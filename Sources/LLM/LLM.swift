@@ -115,7 +115,19 @@ public actor LLMCore {
         llama_sampler_chain_add(sampler!, llama_sampler_init_dist(seed))
     }
     
-    public init(model: Model, path: [CChar], seed: UInt32, topK: Int32, topP: Float, temp: Float, repeatPenalty: Float, repetitionLookback: Int32, maxTokenCount: Int) throws {
+    public init(
+        model: Model,
+        path: [CChar],
+        seed: UInt32,
+        topK: Int32,
+        topP: Float,
+        temp: Float,
+        repeatPenalty: Float,
+        repetitionLookback: Int32,
+        maxTokenCount: Int,
+        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
+        kvCacheTypeV: ggml_type = GGML_TYPE_F16
+    ) throws {
         LLM.ensureInitialized()
         self.model = model
         self.vocab = llama_model_get_vocab(model)
@@ -127,7 +139,7 @@ public actor LLMCore {
         self.repetitionLookback = repetitionLookback
         self.maxTokenCount = maxTokenCount
         self.totalTokenCount = Int(llama_vocab_n_tokens(vocab))
-        
+
         var contextParams = llama_context_default_params()
         let processorCount = Int32(ProcessInfo().processorCount)
         contextParams.n_ctx = UInt32(maxTokenCount)
@@ -135,6 +147,11 @@ public actor LLMCore {
         contextParams.n_threads = processorCount
         contextParams.n_threads_batch = processorCount
         contextParams.embeddings = true
+
+        // KV Cache 量化支持
+        contextParams.type_k = kvCacheTypeK
+        contextParams.type_v = kvCacheTypeV
+
         self.params = contextParams
         
         guard let context = llama_init_from_model(model, params) else {
@@ -1285,7 +1302,9 @@ open class LLM: ObservableObject {
         repeatPenalty: Float = 1.2,
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
-        maxTokenCount: Int32 = 2048
+        maxTokenCount: Int32 = 2048,
+        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
+        kvCacheTypeV: ggml_type = GGML_TYPE_F16
     ) {
         LLM.silenceLogging()
         self.path = path.cString(using: .utf8)!
@@ -1297,7 +1316,7 @@ open class LLM: ObservableObject {
         self.history = history
         self.repeatPenalty = repeatPenalty
         self.repetitionLookback = repetitionLookback
-        
+
         #if DEBUG
         print("GNERATING WITH SEEED: \(seed)")
         #endif
@@ -1309,9 +1328,9 @@ open class LLM: ObservableObject {
             return nil
         }
         self.model = model
-        
+
         let finalMaxTokenCount = Int(min(maxTokenCount, llama_model_n_ctx_train(model)))
-        
+
         do {
             self.core = try LLMCore(
                 model: model,
@@ -1322,7 +1341,9 @@ open class LLM: ObservableObject {
                 temp: temp,
                 repeatPenalty: repeatPenalty,
                 repetitionLookback: repetitionLookback,
-                maxTokenCount: finalMaxTokenCount
+                maxTokenCount: finalMaxTokenCount,
+                kvCacheTypeK: kvCacheTypeK,
+                kvCacheTypeV: kvCacheTypeV
             )
             
             if let stopSequence {
@@ -1347,7 +1368,9 @@ open class LLM: ObservableObject {
         repeatPenalty: Float = 1.2,
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
-        maxTokenCount: Int32 = 2048
+        maxTokenCount: Int32 = 2048,
+        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
+        kvCacheTypeV: ggml_type = GGML_TYPE_F16
     ) {
         self.init(
             from: url.path,
@@ -1360,10 +1383,12 @@ open class LLM: ObservableObject {
             repeatPenalty: repeatPenalty,
             repetitionLookback: repetitionLookback,
             historyLimit: historyLimit,
-            maxTokenCount: maxTokenCount
+            maxTokenCount: maxTokenCount,
+            kvCacheTypeK: kvCacheTypeK,
+            kvCacheTypeV: kvCacheTypeV
         )
     }
-    
+
     public convenience init?(
         from url: URL,
         template: Template,
@@ -1375,7 +1400,9 @@ open class LLM: ObservableObject {
         repeatPenalty: Float = 1.2,
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
-        maxTokenCount: Int32 = 2048
+        maxTokenCount: Int32 = 2048,
+        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
+        kvCacheTypeV: ggml_type = GGML_TYPE_F16
     ) {
         self.init(
             from: url.path,
@@ -1388,12 +1415,14 @@ open class LLM: ObservableObject {
             repeatPenalty: repeatPenalty,
             repetitionLookback: repetitionLookback,
             historyLimit: historyLimit,
-            maxTokenCount: maxTokenCount
+            maxTokenCount: maxTokenCount,
+            kvCacheTypeK: kvCacheTypeK,
+            kvCacheTypeV: kvCacheTypeV
         )
         self.preprocess = template.preprocess
         self.template = template
     }
-    
+
     public convenience init?(
         from huggingFaceModel: HuggingFaceModel,
         to url: URL = .documentsDirectory,
@@ -1407,6 +1436,8 @@ open class LLM: ObservableObject {
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
+        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
+        kvCacheTypeV: ggml_type = GGML_TYPE_F16,
         updateProgress: @Sendable @escaping (Double) -> Void = { print(String(format: "downloaded(%.2f%%)", $0 * 100)) }
     ) async throws {
         let url = try await huggingFaceModel.download(to: url, as: name) { progress in
@@ -1423,7 +1454,9 @@ open class LLM: ObservableObject {
             repeatPenalty: repeatPenalty,
             repetitionLookback: repetitionLookback,
             historyLimit: historyLimit,
-            maxTokenCount: maxTokenCount
+            maxTokenCount: maxTokenCount,
+            kvCacheTypeK: kvCacheTypeK,
+            kvCacheTypeV: kvCacheTypeV
         )
         await setupThinkingTokens(from: huggingFaceModel.template)
     }
