@@ -8,6 +8,24 @@ public enum ThinkingMode: Sendable {
     case enabled
 }
 
+/// KV cache quantization type for reducing memory usage
+public enum KVCacheType: Sendable {
+    /// F16 (half precision) - default, no compression
+    case f16
+    /// Q8_0 (8-bit quantization) - ~50% memory savings
+    case q8_0
+    /// Q4_K (4-bit quantization) - ~75% memory savings
+    case q4_k
+
+    var ggmlValue: UInt32 {
+        switch self {
+        case .f16: return 1   // GGML_TYPE_F16
+        case .q8_0: return 8  // GGML_TYPE_Q8_0
+        case .q4_k: return 12 // GGML_TYPE_Q4_K
+        }
+    }
+}
+
 /// A token used by the language model.
 public typealias Token = llama_token
 
@@ -125,8 +143,8 @@ public actor LLMCore {
         repeatPenalty: Float,
         repetitionLookback: Int32,
         maxTokenCount: Int,
-        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
-        kvCacheTypeV: ggml_type = GGML_TYPE_F16
+        kvCacheTypeK: KVCacheType = .f16,
+        kvCacheTypeV: KVCacheType = .f16
     ) throws {
         LLM.ensureInitialized()
         self.model = model
@@ -149,8 +167,8 @@ public actor LLMCore {
         contextParams.embeddings = true
 
         // KV Cache 量化支持
-        contextParams.type_k = kvCacheTypeK
-        contextParams.type_v = kvCacheTypeV
+        contextParams.type_k = ggml_type(kvCacheTypeK.ggmlValue)
+        contextParams.type_v = ggml_type(kvCacheTypeV.ggmlValue)
 
         self.params = contextParams
         
@@ -1303,8 +1321,8 @@ open class LLM: ObservableObject {
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
-        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
-        kvCacheTypeV: ggml_type = GGML_TYPE_F16
+        kvCacheTypeK: KVCacheType = .f16,
+        kvCacheTypeV: KVCacheType = .f16
     ) {
         LLM.silenceLogging()
         self.path = path.cString(using: .utf8)!
@@ -1369,8 +1387,8 @@ open class LLM: ObservableObject {
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
-        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
-        kvCacheTypeV: ggml_type = GGML_TYPE_F16
+        kvCacheTypeK: KVCacheType = .f16,
+        kvCacheTypeV: KVCacheType = .f16
     ) {
         self.init(
             from: url.path,
@@ -1401,8 +1419,8 @@ open class LLM: ObservableObject {
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
-        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
-        kvCacheTypeV: ggml_type = GGML_TYPE_F16
+        kvCacheTypeK: KVCacheType = .f16,
+        kvCacheTypeV: KVCacheType = .f16
     ) {
         self.init(
             from: url.path,
@@ -1436,8 +1454,8 @@ open class LLM: ObservableObject {
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
-        kvCacheTypeK: ggml_type = GGML_TYPE_F16,
-        kvCacheTypeV: ggml_type = GGML_TYPE_F16,
+        kvCacheTypeK: KVCacheType = .f16,
+        kvCacheTypeV: KVCacheType = .f16,
         updateProgress: @Sendable @escaping (Double) -> Void = { print(String(format: "downloaded(%.2f%%)", $0 * 100)) }
     ) async throws {
         let url = try await huggingFaceModel.download(to: url, as: name) { progress in
