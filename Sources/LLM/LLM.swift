@@ -190,8 +190,57 @@ public actor LLMCore {
         }
         llama_model_free(model)
     }
-    
-    
+
+    // MARK: - 内存管理
+
+    /// 获取详细的内存使用统计
+    /// 返回: (模型权重字节, KV Cache字节, 临时内存字节, 总字节)
+    public func getMemoryStats() -> (Int64, Int64, Int64, Int64) {
+        // 1. 获取模型参数数量
+        let nParams = llama_model_n_params(model)
+
+        // 2. 模型权重内存（根据量化类型估算）
+        // Q4_K_M: 每个参数约 0.5 字节
+        let estimatedWeightBytes = Int64(nParams) / 2
+
+        // 3. KV Cache 内存计算
+        let nCtx = Int32(maxTokenCount)
+        let nEmb = llama_model_n_embd(model)
+        let nLayer = llama_model_n_layer(model)
+
+        // KV Cache 大小 = n_ctx × n_layer × n_embd × 2 × type_size
+        // type_k 和 type_v 的字节大小
+        let bytesPerElementK = (params.type_k == GGML_TYPE_Q8_0) ? 1 : 2
+        let bytesPerElementV = (params.type_v == GGML_TYPE_Q8_0) ? 1 : 2
+        let kvCacheBytes = Int64(nCtx * nLayer * nEmb) *
+                          Int64(bytesPerElementK + bytesPerElementV)
+
+        // 4. 临时内存（其他开销）
+        let temporaryBytes = Int64(64 * 1024 * 1024) // 估算 64MB
+
+        let totalBytes = estimatedWeightBytes + kvCacheBytes + temporaryBytes
+
+        return (estimatedWeightBytes, kvCacheBytes, temporaryBytes, totalBytes)
+    }
+
+    /// 打印详细内存分解（调试用）
+    public func printMemoryBreakdown() {
+        llama_memory_breakdown_print(context)
+    }
+
+    /// 检查是否正在使用中
+    public var isInUse: Bool {
+        return shouldContinuePredicting
+    }
+
+    /// 执行内存清理（清空 KV Cache）
+    public func performMemoryCleanup() {
+        let memory = llama_get_memory(context)
+        llama_memory_clear(memory, false)
+        resetContext()
+    }
+
+
     public func encode(_ text: String, shouldAddBOS: Bool = true, special: Bool = true) -> [Token] {
         let count = Int32(text.utf8.count)
         var tokenCount = count + 1
@@ -1512,7 +1561,30 @@ open class LLM: ObservableObject {
         history.removeAll()
         Task { await core.resetContext() }
     }
-    
+
+    // MARK: - 内存管理
+
+    /// 获取内存使用统计
+    /// 返回: (模型权重字节, KV Cache字节, 临时内存字节, 总字节)
+    public func getMemoryUsage() async -> (Int64, Int64, Int64, Int64) {
+        return await core.getMemoryStats()
+    }
+
+    /// 打印详细内存分解（调试用）
+    public func printMemoryBreakdown() async {
+        await core.printMemoryBreakdown()
+    }
+
+    /// 检查模型是否正在使用
+    public func isInUse() async -> Bool {
+        return await core.isInUse
+    }
+
+    /// 执行内存清理
+    public func cleanupMemory() async {
+        await core.performMemoryCleanup()
+    }
+
     open func recoverFromLengthy(_ input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) {
         output.yield("TL;DR")
     }
