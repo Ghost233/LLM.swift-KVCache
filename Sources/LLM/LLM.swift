@@ -221,7 +221,8 @@ public actor LLMCore {
         let kvCacheBytes = kvCacheBytesMax * 3 / 5
 
         // 4. 临时内存（其他开销）
-        let temporaryBytes = Int64(64 * 1024 * 1024) // 估算 64MB
+        // 根据实际测量调整：约 3 MB
+        let temporaryBytes = Int64(3 * 1024 * 1024)
 
         let totalBytes = estimatedWeightBytes + kvCacheBytes + temporaryBytes
 
