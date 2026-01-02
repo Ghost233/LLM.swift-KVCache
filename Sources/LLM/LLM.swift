@@ -200,25 +200,37 @@ public actor LLMCore {
         let nParams = llama_model_n_params(model)
 
         // 2. 模型权重内存（根据量化类型估算）
-        // Q4_K_M: 每个参数约 0.5 字节
+        // Q4_K_M: 每个参数约 0.5 字节（实际可能更少）
         let estimatedWeightBytes = Int64(nParams) / 2
 
-        // 3. KV Cache 内存计算
+        // 3. KV Cache 内存计算（更精确的估算）
         let nCtx = Int32(maxTokenCount)
         let nEmb = llama_model_n_embd(model)
         let nLayer = llama_model_n_layer(model)
 
-        // KV Cache 大小 = n_ctx × n_layer × n_embd × 2 × type_size
-        // type_k 和 type_v 的字节大小
+        // llama.cpp 的 KV Cache 计算：
+        // 每个token的KV Cache = n_layer × n_embd × 2 × type_size
+        // 但实际分配可能小于这个值（按需分配）
         let bytesPerElementK = (params.type_k == GGML_TYPE_Q8_0) ? 1 : 2
         let bytesPerElementV = (params.type_v == GGML_TYPE_Q8_0) ? 1 : 2
-        let kvCacheBytes = Int64(nCtx * nLayer * nEmb) *
-                          Int64(bytesPerElementK + bytesPerElementV)
+
+        // KV Cache 理论最大值（实际使用中可能只分配一部分）
+        let kvCacheBytesMax = Int64(nCtx) * Int64(nLayer) * Int64(nEmb) * 2
+
+        // 使用更保守的估算（假设实际分配约 60%）
+        let kvCacheBytes = kvCacheBytesMax * 3 / 5
 
         // 4. 临时内存（其他开销）
         let temporaryBytes = Int64(64 * 1024 * 1024) // 估算 64MB
 
         let totalBytes = estimatedWeightBytes + kvCacheBytes + temporaryBytes
+
+        #if DEBUG
+        print(">>> [Memory Stats] nParams: \(nParams), nCtx: \(nCtx), nEmb: \(nEmb), nLayer: \(nLayer)")
+        print(">>> [Memory Stats] Model: \(estimatedWeightBytes / 1024 / 1024) MB")
+        print(">>> [Memory Stats] KV Cache max: \(kvCacheBytesMax / 1024 / 1024) MB, estimated: \(kvCacheBytes / 1024 / 1024) MB")
+        print(">>> [Memory Stats] Total: \(totalBytes / 1024 / 1024) MB")
+        #endif
 
         return (estimatedWeightBytes, kvCacheBytes, temporaryBytes, totalBytes)
     }
