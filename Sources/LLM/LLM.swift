@@ -1398,6 +1398,7 @@ open class LLM: ObservableObject {
         kvCacheTypeV: KVCacheType = .f16,
         enableDebugLog: Bool = false
     ) {
+        LLM.ensureInitialized()  // 必须在加载模型之前调用，以确保 Metal 被禁用
         LLM.silenceLogging()
         self.path = path.cString(using: .utf8)!
         self.seed = seed
