@@ -1362,6 +1362,10 @@ open class LLM: ObservableObject {
     fileprivate static func ensureInitialized() {
         struct Initialization {
             static let invoke: Void = {
+                // 强制禁用 Metal backend（解决真机上 Metal 编译失败的问题）
+                setenv("GGML_METAL_DISABLED", "1", 1)
+                os_log("Metal backend disabled via GGML_METAL_DISABLED=1", log: logger, type: .info)
+
                 llama_backend_init()
             }()
         }
