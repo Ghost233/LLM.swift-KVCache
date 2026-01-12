@@ -1,6 +1,10 @@
 import Foundation
 import llama
+import os.log
 @_exported import LLMMacros
+
+// LLM 日志系统
+private let logger = OSLog(subsystem: "me.ghost23333333333.llm", category: "LLMCore")
 
 public enum ThinkingMode: Sendable {
     case none
@@ -1288,6 +1292,8 @@ open class LLM: ObservableObject {
     
     @Published public private(set) var output = ""
     @Published public private(set) var thinking = ""
+    public private(set) var nGPULayers: Int = 0  // GPU 层数，0 = 仅 CPU
+    public private(set) var enableDebugLog: Bool = false  // 是否启用调试日志
     
     public var template: Template? = nil {
         didSet {
@@ -1380,11 +1386,13 @@ open class LLM: ObservableObject {
         topP: Float = 0.95,
         temp: Float = 0.8,
         repeatPenalty: Float = 1.2,
+        nGPULayers: Int = 0,
         repetitionLookback: Int32 = 64,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
         kvCacheTypeK: KVCacheType = .f16,
-        kvCacheTypeV: KVCacheType = .f16
+        kvCacheTypeV: KVCacheType = .f16,
+        enableDebugLog: Bool = false
     ) {
         LLM.silenceLogging()
         self.path = path.cString(using: .utf8)!
@@ -1396,20 +1404,38 @@ open class LLM: ObservableObject {
         self.history = history
         self.repeatPenalty = repeatPenalty
         self.repetitionLookback = repetitionLookback
+        self.nGPULayers = nGPULayers
+        self.enableDebugLog = enableDebugLog
 
-        #if DEBUG
-        print("GNERATING WITH SEEED: \(seed)")
-        #endif
+        if enableDebugLog {
+            os_log("Initializing with seed: %u", log: logger, type: .info, seed)
+            os_log("nGPULayers: %d, maxTokenCount: %d", log: logger, type: .info, nGPULayers, maxTokenCount)
+            os_log("KV Cache: K=%@, V=%@", log: logger, type: .info, String(describing: kvCacheTypeK), String(describing: kvCacheTypeV))
+        }
         var modelParams = llama_model_default_params()
-        #if targetEnvironment(simulator)
-        modelParams.n_gpu_layers = 0
-        #endif
+        modelParams.n_gpu_layers = Int32(nGPULayers)
+
+        if enableDebugLog {
+            os_log("Loading model from: %@", log: logger, type: .info, path)
+        }
+
         guard let model = llama_model_load_from_file(self.path, modelParams) else {
+            if enableDebugLog {
+                os_log("❌ Failed to load model!", log: logger, type: .error)
+            }
             return nil
+        }
+
+        if enableDebugLog {
+            os_log("✅ Model loaded successfully", log: logger, type: .info)
         }
         self.model = model
 
         let finalMaxTokenCount = Int(min(maxTokenCount, llama_model_n_ctx_train(model)))
+
+        if enableDebugLog {
+            os_log("Creating context with maxTokenCount: %d", log: logger, type: .info, finalMaxTokenCount)
+        }
 
         do {
             self.core = try LLMCore(
@@ -1425,13 +1451,23 @@ open class LLM: ObservableObject {
                 kvCacheTypeK: kvCacheTypeK,
                 kvCacheTypeV: kvCacheTypeV
             )
-            
+
+            if enableDebugLog {
+                os_log("✅ Context created successfully", log: logger, type: .info)
+            }
+
             if let stopSequence {
+                if enableDebugLog {
+                    os_log("Setting stop sequence: %@", log: logger, type: .info, stopSequence)
+                }
                 Task {
                     await core.setStopSequence(stopSequence)
                 }
             }
         } catch {
+            if enableDebugLog {
+                os_log("❌ Failed to create context: %@", log: logger, type: .error, String(describing: error))
+            }
             llama_model_free(model)
             return nil
         }
